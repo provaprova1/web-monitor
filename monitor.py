@@ -1,15 +1,14 @@
 import os
 import hashlib
 import requests
-from playwright.sync_api import sync_playwright
+from bs4 import BeautifulSoup
 
 URL = "https://eplay24.it/promozioni"
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
-IMAGE_FILE = "snapshot.png"
-HASH_FILE = "state.txt"
+STATE_FILE = "state.txt"
 
 
 # =========================
@@ -27,54 +26,64 @@ def send_telegram(msg):
 
 
 # =========================
-# SCREENSHOT SEZIONE
+# ESTRAZIONE PROMO STRUTTURATE
 # =========================
-def take_snapshot():
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+def extract_promos():
+    headers = {"User-Agent": "Mozilla/5.0"}
+    r = requests.get(URL, headers=headers, timeout=20)
+    soup = BeautifulSoup(r.text, "html.parser")
 
-        page.goto(URL, wait_until="networkidle", timeout=60000)
+    # rimuove rumore
+    for tag in soup(["script", "style", "noscript", "svg", "footer", "header", "nav"]):
+        tag.decompose()
 
-        # aspetta caricamento
-        page.wait_for_timeout(3000)
+    promos = set()
 
-        # 👉 CERCA SEZIONE "PROMOZIONI SPORT"
-        # (fallback generico se non trova esatto)
-        try:
-            element = page.locator("text=Promozioni Sport").first
-            box = element.bounding_box()
+    # CERCHIAMO “card-like content”
+    for block in soup.find_all(["div", "section", "article"]):
 
-            if box:
-                page.screenshot(path=IMAGE_FILE, clip=box)
-            else:
-                page.screenshot(path=IMAGE_FILE, full_page=True)
+        text = block.get_text(" ", strip=True)
+        text = " ".join(text.split())
 
-        except:
-            page.screenshot(path=IMAGE_FILE, full_page=True)
+        # filtro qualità minimo
+        if len(text) < 30:
+            continue
 
-        browser.close()
+        # deve sembrare promo
+        keywords = ["bonus", "promo", "cashback", "offerta", "%", "free", "spin"]
+
+        if any(k in text.lower() for k in keywords):
+
+            # normalizzazione forte
+            cleaned = text.lower().strip()
+
+            # riduce rumore numerico random
+            cleaned = "".join(c for c in cleaned if c.isalnum() or c.isspace())
+
+            promos.add(cleaned)
+
+    return sorted(promos)
 
 
 # =========================
-# HASH IMMAGINE
+# HASH STABILE
 # =========================
-def hash_image():
-    with open(IMAGE_FILE, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
+def hash_data(data):
+    joined = "||".join(sorted(data))
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
 
 # =========================
 # STATE
 # =========================
-def load_hash():
-    if os.path.exists(HASH_FILE):
-        return open(HASH_FILE).read().strip()
+def load_state():
+    if os.path.exists(STATE_FILE):
+        return open(STATE_FILE).read().strip()
     return None
 
 
-def save_hash(h):
-    with open(HASH_FILE, "w") as f:
+def save_state(h):
+    with open(STATE_FILE, "w") as f:
         f.write(h)
 
 
@@ -82,26 +91,31 @@ def save_hash(h):
 # MAIN
 # =========================
 def main():
-    take_snapshot()
+    promos = extract_promos()
 
-    new_hash = hash_image()
-    old_hash = load_hash()
+    new_hash = hash_data(promos)
+    old_hash = load_state()
 
+    print("PROMO TROVATE:", len(promos))
     print("HASH NUOVO:", new_hash)
     print("HASH VECCHIO:", old_hash)
 
+    # DEBUG UTILE (puoi lasciarlo o rimuoverlo)
+    for p in promos[:5]:
+        print("PROMO:", p)
+
     if old_hash is None:
-        save_hash(new_hash)
-        send_telegram("🟢 Monitor visuale avviato")
+        save_state(new_hash)
+        send_telegram("🟢 Monitor avviato (baseline promo salvata)")
         print("INIT OK")
         return
 
     if new_hash != old_hash:
-        save_hash(new_hash)
-        send_telegram("⚠️ CAMBIAMENTO GRAFICO RILEVATO (Promozioni Sport)")
-        print("CAMBIAMENTO VISIVO")
+        save_state(new_hash)
+        send_telegram("⚠️ NUOVE PROMO RILEVATE!\n\n" + URL)
+        print("CAMBIAMENTO REALE")
     else:
-        print("NESSUN CAMBIAMENTO")
+        print("NESSUNA VARIAZIONE")
 
 
 if __name__ == "__main__":
