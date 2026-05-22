@@ -1,15 +1,15 @@
 import os
 import hashlib
-from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright
 import requests
+from playwright.sync_api import sync_playwright
 
 URL = "https://eplay24.it/promozioni"
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
-STATE_FILE = "state.txt"
+IMAGE_FILE = "snapshot.png"
+HASH_FILE = "state.txt"
 
 
 # =========================
@@ -27,65 +27,54 @@ def send_telegram(msg):
 
 
 # =========================
-# RENDER PAGINA (PLAYWRIGHT)
+# SCREENSHOT SEZIONE
 # =========================
-def get_rendered_html():
+def take_snapshot():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
 
         page.goto(URL, wait_until="networkidle", timeout=60000)
 
-        html = page.content()
+        # aspetta caricamento
+        page.wait_for_timeout(3000)
+
+        # 👉 CERCA SEZIONE "PROMOZIONI SPORT"
+        # (fallback generico se non trova esatto)
+        try:
+            element = page.locator("text=Promozioni Sport").first
+            box = element.bounding_box()
+
+            if box:
+                page.screenshot(path=IMAGE_FILE, clip=box)
+            else:
+                page.screenshot(path=IMAGE_FILE, full_page=True)
+
+        except:
+            page.screenshot(path=IMAGE_FILE, full_page=True)
 
         browser.close()
-        return html
 
 
 # =========================
-# ESTRAZIONE STABILE
+# HASH IMMAGINE
 # =========================
-def extract_promos(html):
-    soup = BeautifulSoup(html, "html.parser")
-
-    for tag in soup(["script", "style", "noscript", "svg", "footer", "header", "nav"]):
-        tag.decompose()
-
-    promos = set()
-
-    # prendiamo SOLO link visibili reali
-    for a in soup.find_all("a", href=True):
-        text = a.get_text(" ", strip=True)
-        href = a["href"]
-
-        if text and len(text) > 5:
-            promos.add(text.lower().strip())
-
-        if href:
-            promos.add(href.split("?")[0])
-
-    return sorted(promos)
-
-
-# =========================
-# HASH
-# =========================
-def hash_data(data):
-    joined = "||".join(sorted(data))
-    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+def hash_image():
+    with open(IMAGE_FILE, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
 
 
 # =========================
 # STATE
 # =========================
-def load_state():
-    if os.path.exists(STATE_FILE):
-        return open(STATE_FILE).read().strip()
+def load_hash():
+    if os.path.exists(HASH_FILE):
+        return open(HASH_FILE).read().strip()
     return None
 
 
-def save_state(h):
-    with open(STATE_FILE, "w") as f:
+def save_hash(h):
+    with open(HASH_FILE, "w") as f:
         f.write(h)
 
 
@@ -93,28 +82,26 @@ def save_state(h):
 # MAIN
 # =========================
 def main():
-    html = get_rendered_html()
-    promos = extract_promos(html)
+    take_snapshot()
 
-    new_hash = hash_data(promos)
-    old_hash = load_state()
+    new_hash = hash_image()
+    old_hash = load_hash()
 
-    print("PROMO:", len(promos))
     print("HASH NUOVO:", new_hash)
     print("HASH VECCHIO:", old_hash)
 
     if old_hash is None:
-        save_state(new_hash)
-        send_telegram("🟢 Monitor avviato (baseline salvata)")
+        save_hash(new_hash)
+        send_telegram("🟢 Monitor visuale avviato")
         print("INIT OK")
         return
 
     if new_hash != old_hash:
-        save_state(new_hash)
-        send_telegram("⚠️ NUOVE PROMO RILEVATE!\n\n" + URL)
-        print("CAMBIAMENTO REALE")
+        save_hash(new_hash)
+        send_telegram("⚠️ CAMBIAMENTO GRAFICO RILEVATO (Promozioni Sport)")
+        print("CAMBIAMENTO VISIVO")
     else:
-        print("NESSUNA VARIAZIONE")
+        print("NESSUN CAMBIAMENTO")
 
 
 if __name__ == "__main__":
