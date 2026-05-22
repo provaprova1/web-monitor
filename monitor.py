@@ -1,8 +1,8 @@
-import requests
-from bs4 import BeautifulSoup
-import hashlib
 import os
-from urllib.parse import urljoin, urlparse
+import hashlib
+from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright
+import requests
 
 URL = "https://eplay24.it/promozioni"
 
@@ -27,45 +27,42 @@ def send_telegram(msg):
 
 
 # =========================
-# NORMALIZZAZIONE URL
+# RENDER PAGINA (PLAYWRIGHT)
 # =========================
-def clean_url(href):
-    if not href:
-        return None
+def get_rendered_html():
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
 
-    # assolutizza URL
-    full = urljoin(URL, href)
+        page.goto(URL, wait_until="networkidle", timeout=60000)
 
-    # rimuove query string (IMPORTANTISSIMO)
-    parsed = urlparse(full)
-    clean = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        html = page.content()
 
-    return clean
+        browser.close()
+        return html
 
 
 # =========================
-# ESTRAZIONE PROMO STABILE
+# ESTRAZIONE STABILE
 # =========================
-def get_promos():
-    headers = {"User-Agent": "Mozilla/5.0"}
-    r = requests.get(URL, headers=headers, timeout=20)
-    soup = BeautifulSoup(r.text, "html.parser")
+def extract_promos(html):
+    soup = BeautifulSoup(html, "html.parser")
 
     for tag in soup(["script", "style", "noscript", "svg", "footer", "header", "nav"]):
         tag.decompose()
 
     promos = set()
 
-    # SOLO LINK (molto più stabile del testo)
+    # prendiamo SOLO link visibili reali
     for a in soup.find_all("a", href=True):
-        href = clean_url(a["href"])
+        text = a.get_text(" ", strip=True)
+        href = a["href"]
 
-        if href and "eplay24.it" in href:
-            promos.add(href)
+        if text and len(text) > 5:
+            promos.add(text.lower().strip())
 
-    # fallback minimo
-    if not promos:
-        promos.add(URL)
+        if href:
+            promos.add(href.split("?")[0])
 
     return sorted(promos)
 
@@ -96,12 +93,13 @@ def save_state(h):
 # MAIN
 # =========================
 def main():
-    promos = get_promos()
+    html = get_rendered_html()
+    promos = extract_promos(html)
 
     new_hash = hash_data(promos)
     old_hash = load_state()
 
-    print("PROMO TROVATE:", len(promos))
+    print("PROMO:", len(promos))
     print("HASH NUOVO:", new_hash)
     print("HASH VECCHIO:", old_hash)
 
