@@ -11,6 +11,8 @@ URL = "https://eplay24.it/promozioni"
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
+STATE_FILE = "state.txt"
+
 
 # =========================
 # TELEGRAM
@@ -29,43 +31,30 @@ def send_telegram(message):
 
 
 # =========================
-# ESTRAZIONE INTELLIGENTE
+# ESTRAZIONE CONTENUTO
 # =========================
 def get_content(url):
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
+    headers = {"User-Agent": "Mozilla/5.0"}
 
-    r = requests.get(url, headers=headers, timeout=15)
+    r = requests.get(url, headers=headers, timeout=20)
     soup = BeautifulSoup(r.text, "html.parser")
 
-    # rimuove rumore inutile
+    # rimuove rumore
     for tag in soup(["script", "style", "noscript", "svg", "footer", "header", "nav"]):
         tag.decompose()
 
-    # parole chiave rilevanti (filtraggio intelligente)
-    keywords = ["promo", "bonus", "offerta", "cashback", "free", "giri", "spin"]
+    main = soup.find("main")
 
-    blocks = []
-
-    for tag in soup.find_all(["div", "section", "article"]):
-        text = tag.get_text(" ", strip=True)
-        text = " ".join(text.split())
-
-        if len(text) > 30:
-            if any(k in text.lower() for k in keywords):
-                blocks.append(text)
-
-    # fallback (se non trova blocchi buoni)
-    if not blocks:
+    if main:
+        text = main.get_text(" ", strip=True)
+    else:
         text = soup.get_text(" ", strip=True)
-        return " ".join(text.split())
 
-    return " | ".join(blocks)
+    return " ".join(text.split())
 
 
 # =========================
-# HASH ROBUSTO
+# HASH
 # =========================
 def hash_content(content):
     content = content.lower()
@@ -74,16 +63,17 @@ def hash_content(content):
 
 
 # =========================
-# STATO
+# STATO (PERSISTENTE SU FILE)
 # =========================
-def load_old():
-    if os.path.exists("state.txt"):
-        return open("state.txt").read().strip()
+def load_old_hash():
+    if os.path.exists(STATE_FILE):
+        with open(STATE_FILE, "r") as f:
+            return f.read().strip()
     return None
 
 
-def save_new(h):
-    with open("state.txt", "w") as f:
+def save_new_hash(h):
+    with open(STATE_FILE, "w") as f:
         f.write(h)
 
 
@@ -93,23 +83,25 @@ def save_new(h):
 def main():
     content = get_content(URL)
     new_hash = hash_content(content)
-    old_hash = load_old()
+    old_hash = load_old_hash()
 
     print("HASH NUOVO:", new_hash)
     print("HASH VECCHIO:", old_hash)
 
+    # primo run
     if old_hash is None:
-        save_new(new_hash)
+        save_new_hash(new_hash)
         send_telegram("🟢 Monitor avviato. Stato iniziale salvato.")
         print("INIT OK")
         return
 
+    # cambiamento
     if new_hash != old_hash:
-        save_new(new_hash)
+        save_new_hash(new_hash)
 
         send_telegram(
             "⚠️ CAMBIAMENTO RILEVATO!\n\n"
-            "Pagina promozioni aggiornata:\n" + URL
+            "Pagina aggiornata:\n" + URL
         )
 
         print("CAMBIAMENTO RILEVATO")
