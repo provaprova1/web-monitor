@@ -2,6 +2,7 @@ import requests
 from bs4 import BeautifulSoup
 import hashlib
 import os
+from urllib.parse import urljoin, urlparse
 
 URL = "https://eplay24.it/promozioni"
 
@@ -26,35 +27,45 @@ def send_telegram(msg):
 
 
 # =========================
-# ESTRAZIONE STABILE
+# NORMALIZZAZIONE URL
 # =========================
-def get_promos(url):
+def clean_url(href):
+    if not href:
+        return None
+
+    # assolutizza URL
+    full = urljoin(URL, href)
+
+    # rimuove query string (IMPORTANTISSIMO)
+    parsed = urlparse(full)
+    clean = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+
+    return clean
+
+
+# =========================
+# ESTRAZIONE PROMO STABILE
+# =========================
+def get_promos():
     headers = {"User-Agent": "Mozilla/5.0"}
-    r = requests.get(url, headers=headers, timeout=20)
+    r = requests.get(URL, headers=headers, timeout=20)
     soup = BeautifulSoup(r.text, "html.parser")
 
-    # rimuove rumore
     for tag in soup(["script", "style", "noscript", "svg", "footer", "header", "nav"]):
         tag.decompose()
 
     promos = set()
 
-    # CERCA TITOLI + LINK (più stabile del testo intero)
-    for a in soup.find_all("a"):
-        text = a.get_text(" ", strip=True)
-        href = a.get("href")
+    # SOLO LINK (molto più stabile del testo)
+    for a in soup.find_all("a", href=True):
+        href = clean_url(a["href"])
 
-        if text and len(text) > 5:
-            if any(k in text.lower() for k in ["promo", "bonus", "cashback", "offerta", "%"]):
-                promos.add(text.lower().strip())
+        if href and "eplay24.it" in href:
+            promos.add(href)
 
-        if href and "/promo" in href:
-            promos.add(href.strip())
-
-    # fallback se non trova nulla
+    # fallback minimo
     if not promos:
-        fallback = soup.get_text(" ", strip=True)
-        promos = {" ".join(fallback.split())[:2000]}
+        promos.add(URL)
 
     return sorted(promos)
 
@@ -85,7 +96,7 @@ def save_state(h):
 # MAIN
 # =========================
 def main():
-    promos = get_promos(URL)
+    promos = get_promos()
 
     new_hash = hash_data(promos)
     old_hash = load_state()
@@ -96,7 +107,7 @@ def main():
 
     if old_hash is None:
         save_state(new_hash)
-        send_telegram("🟢 Monitor avviato (baseline promo salvata)")
+        send_telegram("🟢 Monitor avviato (baseline salvata)")
         print("INIT OK")
         return
 
