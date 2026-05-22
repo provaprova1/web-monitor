@@ -1,7 +1,7 @@
 import os
 import hashlib
 import requests
-from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright
 
 URL = "https://eplay24.it/promozioni"
 
@@ -26,51 +26,55 @@ def send_telegram(msg):
 
 
 # =========================
-# ESTRAZIONE PROMO STRUTTURATE
+# ESTRAZIONE STABILE (DOM TARGET)
 # =========================
-def extract_promos():
-    headers = {"User-Agent": "Mozilla/5.0"}
-    r = requests.get(URL, headers=headers, timeout=20)
-    soup = BeautifulSoup(r.text, "html.parser")
+def extract_content():
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
 
-    # rimuove rumore
-    for tag in soup(["script", "style", "noscript", "svg", "footer", "header", "nav"]):
-        tag.decompose()
+        page.goto(URL, wait_until="networkidle", timeout=60000)
 
-    promos = set()
+        page.wait_for_timeout(3000)
 
-    # CERCHIAMO “card-like content”
-    for block in soup.find_all(["div", "section", "article"]):
+        # 🔥 prova a isolare la sezione visibile
+        selectors = [
+            "text=Promozioni Sport",
+            "h1:has-text('Promozioni')",
+            "section",
+            "main"
+        ]
 
-        text = block.get_text(" ", strip=True)
-        text = " ".join(text.split())
+        content = ""
 
-        # filtro qualità minimo
-        if len(text) < 30:
-            continue
+        for sel in selectors:
+            try:
+                el = page.locator(sel).first
+                txt = el.inner_text(timeout=2000)
 
-        # deve sembrare promo
-        keywords = ["bonus", "promo", "cashback", "offerta", "%", "free", "spin"]
+                if txt and len(txt) > 100:
+                    content = txt
+                    break
+            except:
+                continue
 
-        if any(k in text.lower() for k in keywords):
+        browser.close()
 
-            # normalizzazione forte
-            cleaned = text.lower().strip()
+        # fallback totale
+        if not content:
+            content = page.content()
 
-            # riduce rumore numerico random
-            cleaned = "".join(c for c in cleaned if c.isalnum() or c.isspace())
+        # normalizzazione forte
+        content = " ".join(content.lower().split())
 
-            promos.add(cleaned)
-
-    return sorted(promos)
+        return content
 
 
 # =========================
-# HASH STABILE
+# HASH
 # =========================
 def hash_data(data):
-    joined = "||".join(sorted(data))
-    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+    return hashlib.sha256(data.encode("utf-8")).hexdigest()
 
 
 # =========================
@@ -91,28 +95,27 @@ def save_state(h):
 # MAIN
 # =========================
 def main():
-    promos = extract_promos()
+    content = extract_content()
 
-    new_hash = hash_data(promos)
+    new_hash = hash_data(content)
     old_hash = load_state()
 
-    print("PROMO TROVATE:", len(promos))
     print("HASH NUOVO:", new_hash)
     print("HASH VECCHIO:", old_hash)
 
-    # DEBUG UTILE (puoi lasciarlo o rimuoverlo)
-    for p in promos[:5]:
-        print("PROMO:", p)
+    # 🔥 DEBUG FONDAMENTALE
+    print("LUNGHEZZA CONTENUTO:", len(content))
+    print(content[:300])
 
     if old_hash is None:
         save_state(new_hash)
-        send_telegram("🟢 Monitor avviato (baseline promo salvata)")
+        send_telegram("🟢 Monitor avviato (baseline stabile)")
         print("INIT OK")
         return
 
     if new_hash != old_hash:
         save_state(new_hash)
-        send_telegram("⚠️ NUOVE PROMO RILEVATE!\n\n" + URL)
+        send_telegram("⚠️ NUOVE PROMO RILEVATE\n\n" + URL)
         print("CAMBIAMENTO REALE")
     else:
         print("NESSUNA VARIAZIONE")
