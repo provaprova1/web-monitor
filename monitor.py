@@ -3,9 +3,6 @@ from bs4 import BeautifulSoup
 import hashlib
 import os
 
-# =========================
-# CONFIG
-# =========================
 URL = "https://eplay24.it/promozioni"
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -17,21 +14,22 @@ STATE_FILE = "state.txt"
 # =========================
 # TELEGRAM
 # =========================
-def send_telegram(message):
+def send_telegram(msg):
     if not BOT_TOKEN or not CHAT_ID:
         print("Missing secrets")
         return
 
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": CHAT_ID, "text": message})
+    requests.post(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+        data={"chat_id": CHAT_ID, "text": msg}
+    )
 
 
 # =========================
-# ESTRAZIONE SOLO PROMO
+# ESTRAZIONE STABILE
 # =========================
-def get_promotions(url):
+def get_promos(url):
     headers = {"User-Agent": "Mozilla/5.0"}
-
     r = requests.get(url, headers=headers, timeout=20)
     soup = BeautifulSoup(r.text, "html.parser")
 
@@ -39,34 +37,33 @@ def get_promotions(url):
     for tag in soup(["script", "style", "noscript", "svg", "footer", "header", "nav"]):
         tag.decompose()
 
-    promos = []
+    promos = set()
 
-    # prova a prendere blocchi "logici"
-    for block in soup.find_all(["div", "section", "article"]):
-        text = block.get_text(" ", strip=True)
-        text = " ".join(text.split())
+    # CERCA TITOLI + LINK (più stabile del testo intero)
+    for a in soup.find_all("a"):
+        text = a.get_text(" ", strip=True)
+        href = a.get("href")
 
-        # filtro minimo qualità
-        if len(text) < 40:
-            continue
+        if text and len(text) > 5:
+            if any(k in text.lower() for k in ["promo", "bonus", "cashback", "offerta", "%"]):
+                promos.add(text.lower().strip())
 
-        # deve sembrare promo
-        keywords = ["promo", "bonus", "cashback", "offerta", "free", "spin", "%"]
-        if any(k in text.lower() for k in keywords):
-            promos.append(text)
+        if href and "/promo" in href:
+            promos.add(href.strip())
 
-    # fallback
+    # fallback se non trova nulla
     if not promos:
-        promos = [soup.get_text(" ", strip=True)]
+        fallback = soup.get_text(" ", strip=True)
+        promos = {" ".join(fallback.split())[:2000]}
 
-    return sorted(set(promos))
+    return sorted(promos)
 
 
 # =========================
-# HASH STABILE
+# HASH
 # =========================
-def hash_data(data_list):
-    joined = "||".join(sorted([d.lower().strip() for d in data_list]))
+def hash_data(data):
+    joined = "||".join(sorted(data))
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
 
@@ -88,7 +85,8 @@ def save_state(h):
 # MAIN
 # =========================
 def main():
-    promos = get_promotions(URL)
+    promos = get_promos(URL)
+
     new_hash = hash_data(promos)
     old_hash = load_state()
 
@@ -104,10 +102,10 @@ def main():
 
     if new_hash != old_hash:
         save_state(new_hash)
-        send_telegram("⚠️ NUOVE PROMO RILEVATE!\n\nControlla il sito: " + URL)
-        print("CAMBIAMENTO REALE RILEVATO")
+        send_telegram("⚠️ NUOVE PROMO RILEVATE!\n\n" + URL)
+        print("CAMBIAMENTO REALE")
     else:
-        print("NESSUNA NUOVA PROMO")
+        print("NESSUNA VARIAZIONE")
 
 
 if __name__ == "__main__":
