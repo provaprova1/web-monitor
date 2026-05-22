@@ -18,13 +18,27 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
-          pip install requests beautifulsoup4 playwright
-          playwright install chromium
+          pip install requests beautifulsoup4
+
+      # 🔥 CARICA STATO
+      - name: Restore state cache
+        uses: actions/cache@v4
+        with:
+          path: state.txt
+          key: promo-state
 
       - name: Run monitor
         run: python monitor.py
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
+
+      # 🔥 SALVA STATO
+      - name: Save state cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: state.txt
+          key: promo-state
