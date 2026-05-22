@@ -5,9 +5,6 @@ on:
     - cron: "*/30 * * * *"
   workflow_dispatch:
 
-permissions:
-  contents: write   # 🔥 QUESTO RISOLVE IL PROBLEMA
-
 jobs:
   monitor:
     runs-on: ubuntu-latest
@@ -15,8 +12,6 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-        with:
-          persist-credentials: true
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -25,18 +20,11 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests beautifulsoup4
+          pip install requests beautifulsoup4 playwright
+          playwright install chromium
 
       - name: Run monitor
         run: python monitor.py
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-
-      - name: Commit state
-        run: |
-          git config user.name github-actions
-          git config user.email github-actions@github.com
-          git add state.txt
-          git commit -m "update state" || echo "no changes"
-          git push
