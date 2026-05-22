@@ -8,21 +8,18 @@ import os
 # =========================
 URL = "https://eplay24.it/promozioni"
 
-# Se usi GitHub Actions (consigliato)
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
-
-if not BOT_TOKEN or not CHAT_ID:
-    print("ERRORE: Secrets mancanti")
-    exit(1)
-print("BOT_TOKEN presente:", BOT_TOKEN is not None)
-print("CHAT_ID presente:", CHAT_ID is not None)
 
 
 # =========================
 # TELEGRAM
 # =========================
 def send_telegram(message):
+    if not BOT_TOKEN or not CHAT_ID:
+        print("❌ Secrets mancanti")
+        return
+
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     data = {
         "chat_id": CHAT_ID,
@@ -32,7 +29,7 @@ def send_telegram(message):
 
 
 # =========================
-# ESTRAZIONE CONTENUTO
+# ESTRAZIONE INTELLIGENTE
 # =========================
 def get_content(url):
     headers = {
@@ -42,37 +39,46 @@ def get_content(url):
     r = requests.get(url, headers=headers, timeout=15)
     soup = BeautifulSoup(r.text, "html.parser")
 
-    # rimuove rumore
-    for tag in soup(["script", "style", "noscript", "svg"]):
+    # rimuove rumore inutile
+    for tag in soup(["script", "style", "noscript", "svg", "footer", "header", "nav"]):
         tag.decompose()
 
-    # prova a prendere solo contenuto principale
-    main = soup.find("main")
-    if main:
-        text = main.get_text(separator=" ", strip=True)
-    else:
-        text = soup.get_text(separator=" ", strip=True)
+    # parole chiave rilevanti (filtraggio intelligente)
+    keywords = ["promo", "bonus", "offerta", "cashback", "free", "giri", "spin"]
 
-    # normalizzazione forte
-    text = " ".join(text.split())
+    blocks = []
 
-    return text
+    for tag in soup.find_all(["div", "section", "article"]):
+        text = tag.get_text(" ", strip=True)
+        text = " ".join(text.split())
+
+        if len(text) > 30:
+            if any(k in text.lower() for k in keywords):
+                blocks.append(text)
+
+    # fallback (se non trova blocchi buoni)
+    if not blocks:
+        text = soup.get_text(" ", strip=True)
+        return " ".join(text.split())
+
+    return " | ".join(blocks)
 
 
 # =========================
-# HASH
+# HASH ROBUSTO
 # =========================
 def hash_content(content):
+    content = content.lower()
+    content = " ".join(content.split())
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 # =========================
-# STATO LOCALE
+# STATO
 # =========================
 def load_old():
     if os.path.exists("state.txt"):
-        with open("state.txt", "r") as f:
-            return f.read().strip()
+        return open("state.txt").read().strip()
     return None
 
 
@@ -89,23 +95,26 @@ def main():
     new_hash = hash_content(content)
     old_hash = load_old()
 
-    # prima esecuzione
+    print("HASH NUOVO:", new_hash)
+    print("HASH VECCHIO:", old_hash)
+
     if old_hash is None:
         save_new(new_hash)
         send_telegram("🟢 Monitor avviato. Stato iniziale salvato.")
-        print("Prima esecuzione → salvato stato")
+        print("INIT OK")
         return
 
-    # cambiamento
     if new_hash != old_hash:
         save_new(new_hash)
-        print("⚠️ CAMBIAMENTO RILEVATO")
 
         send_telegram(
-            "⚠️ CAMBIAMENTO RILEVATO!\n\nPagina promozioni aggiornata:\n" + URL
+            "⚠️ CAMBIAMENTO RILEVATO!\n\n"
+            "Pagina promozioni aggiornata:\n" + URL
         )
+
+        print("CAMBIAMENTO RILEVATO")
     else:
-        print("Nessun cambiamento")
+        print("NESSUN CAMBIAMENTO")
 
 
 if __name__ == "__main__":
