@@ -21,6 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install requests beautifulsoup4 playwright
+          playwright install-deps
           playwright install chromium
 
       - name: Run monitor
