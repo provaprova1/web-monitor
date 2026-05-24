@@ -8,9 +8,12 @@ URL = "https://eplay24.it/promozioni"
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
-STATE_URL = os.environ.get("STATE_URL")  # raw GitHub file o gist
+STATE_FILE = "state.txt"
 
 
+# =========================
+# TELEGRAM
+# =========================
 def send_telegram(msg):
     if not BOT_TOKEN or not CHAT_ID:
         print("Missing Telegram config")
@@ -23,6 +26,9 @@ def send_telegram(msg):
     )
 
 
+# =========================
+# ESTRAZIONE CONTENUTO
+# =========================
 def extract_content():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
@@ -38,41 +44,55 @@ def extract_content():
         return " ".join(content.lower().split())
 
 
-def hash_text(t):
-    return hashlib.sha256(t.encode()).hexdigest()
+# =========================
+# HASH
+# =========================
+def make_hash(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+# =========================
+# STATE
+# =========================
 def load_state():
-    if not STATE_URL:
+    if not os.path.exists(STATE_FILE):
         return None
-    try:
-        r = requests.get(STATE_URL, timeout=10)
-        if r.status_code == 200:
-            return r.text.strip()
-    except:
-        pass
-    return None
+    with open(STATE_FILE, "r") as f:
+        return f.read().strip()
 
 
+def save_state(h):
+    with open(STATE_FILE, "w") as f:
+        f.write(h)
+
+
+# =========================
+# MAIN (DEBUG COMPLETO)
+# =========================
 def main():
-    content = extract_content()
+    print("📁 WORKING DIR:", os.getcwd())
+    print("📄 FILES:", os.listdir("."))
+    print("📄 STATE EXISTS:", os.path.exists(STATE_FILE))
 
-    new_hash = hash_text(content)
+    content = extract_content()
+    new_hash = make_hash(content)
     old_hash = load_state()
 
-    print("STATE URL:", STATE_URL)
-    print("OLD:", old_hash)
-    print("NEW:", new_hash)
+    print("OLD HASH:", old_hash)
+    print("NEW HASH:", new_hash)
 
-    # 🔥 FIX DEFINITIVO
+    # 🔥 PRIMO RUN
     if old_hash is None:
+        save_state(new_hash)
         send_telegram("🟢 Monitor avviato (baseline iniziale)")
         print("INIT OK")
         return
 
+    # 🔥 CAMBIO
     if new_hash != old_hash:
+        save_state(new_hash)
         send_telegram("⚠️ NUOVE PROMO RILEVATE!\n\n" + URL)
-        print("CHANGE")
+        print("CHANGE DETECTED")
     else:
         print("NO CHANGE")
 

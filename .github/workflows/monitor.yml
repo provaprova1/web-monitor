@@ -10,19 +10,34 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      # =========================
+      # CHECKOUT REPO
+      # =========================
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      # =========================
+      # PYTHON
+      # =========================
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - run: |
+      # =========================
+      # DEPENDENCIES
+      # =========================
+      - name: Install dependencies
+        run: |
           pip install requests playwright
           playwright install-deps
           playwright install chromium
 
-      - run: python monitor.py
+      # =========================
+      # RUN MONITOR
+      # =========================
+      - name: Run monitor
+        run: python monitor.py
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-          STATE_URL: ${{ secrets.STATE_URL }}
