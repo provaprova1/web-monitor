@@ -40,7 +40,7 @@ jobs:
 
           git add state.txt || true
 
-          git diff --cached --quiet && echo "no changes" && exit 0
+          git diff --cached --quiet && exit 0
 
           git commit -m "update state"
           git push
