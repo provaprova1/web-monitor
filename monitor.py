@@ -8,7 +8,7 @@ URL = "https://eplay24.it/promozioni"
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
-STATE_URL = os.environ.get("STATE_URL")  # 👈 stato remoto
+STATE_URL = os.environ.get("STATE_URL")  # stato remoto (RAW FILE GITHUB o GIST)
 
 
 # =========================
@@ -47,42 +47,37 @@ def extract_content():
 # =========================
 # HASH
 # =========================
-def make_hash(t):
-    return hashlib.sha256(t.encode()).hexdigest()
+def make_hash(text):
+    return hashlib.sha256(text.encode()).hexdigest()
 
 
 # =========================
-# STATE REMOTO (CRUCIALE)
+# STATE REMOTO
 # =========================
 def load_state():
     if not STATE_URL:
         return None
+
     try:
         r = requests.get(STATE_URL, timeout=10)
         if r.status_code == 200:
             return r.text.strip()
     except:
         pass
+
     return None
 
 
-def save_state(h):
-    # qui puoi usare GitHub API o gist update
-    print("NEW STATE WOULD BE:", h)
-
-
-# =========================
-# MAIN
-# =========================
 def main():
     content = extract_content()
     new_hash = make_hash(content)
     old_hash = load_state()
 
-    print("OLD:", old_hash)
-    print("NEW:", new_hash)
+    print("STATE URL:", STATE_URL)
+    print("OLD HASH:", old_hash)
+    print("NEW HASH:", new_hash)
 
-    # 🔥 FIX ASSOLUTO
+    # 🔥 FIX DEFINITIVO
     if old_hash is None:
         send_telegram("🟢 Monitor avviato (baseline iniziale)")
         print("INIT OK")
@@ -90,7 +85,7 @@ def main():
 
     if new_hash != old_hash:
         send_telegram("⚠️ NUOVE PROMO RILEVATE!\n\n" + URL)
-        print("CHANGE")
+        print("CHANGE DETECTED")
     else:
         print("NO CHANGE")
 
