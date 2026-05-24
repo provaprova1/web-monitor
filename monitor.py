@@ -29,6 +29,13 @@ def send(msg):
 
 
 # =========================
+# NORMALIZZAZIONE
+# =========================
+def clean(text: str) -> str:
+    return " ".join(text.lower().split())
+
+
+# =========================
 # STATE
 # =========================
 def load_state():
@@ -36,24 +43,17 @@ def load_state():
         return set()
 
     with open(STATE_FILE, "r", encoding="utf-8") as f:
-        return set(line.strip() for line in f if line.strip())
+        return set(clean(line) for line in f if line.strip())
 
 
 def save_state(items):
     with open(STATE_FILE, "w", encoding="utf-8") as f:
-        for i in sorted(items):
+        for i in sorted(set(clean(x) for x in items)):
             f.write(i + "\n")
 
 
 # =========================
-# NORMALIZZAZIONE
-# =========================
-def clean(t):
-    return " ".join(t.lower().split())
-
-
-# =========================
-# ESTRAZIONE ROBUSTA (NO DOM FRAGILE)
+# ESTRAZIONE ROBUSTA
 # =========================
 def extract_promos():
     with sync_playwright() as p:
@@ -63,16 +63,25 @@ def extract_promos():
         page.goto(URL, wait_until="networkidle", timeout=60000)
         page.wait_for_timeout(8000)
 
-        # scroll per caricare contenuti dinamici
         page.mouse.wheel(0, 4000)
         page.wait_for_timeout(4000)
 
-        # prendi testo visibile globale
-        body_text = page.inner_text("body").lower()
-
+        body_text = page.inner_text("body")
         browser.close()
 
         items = set()
+
+        keywords = [
+            "serie a",
+            "premier league",
+            "laliga",
+            "bundesliga",
+            "bonus",
+            "promo",
+            "freebet",
+            "cashback",
+            "rimborso"
+        ]
 
         for line in body_text.split("\n"):
             t = clean(line)
@@ -80,25 +89,14 @@ def extract_promos():
             if len(t) < 15:
                 continue
 
-            # filtri "sport promo reali"
-            if any(k in t for k in [
-                "serie a",
-                "premier league",
-                "laliga",
-                "bundesliga",
-                "bonus",
-                "promo",
-                "freebet",
-                "cashback",
-                "rimborso"
-            ]):
+            if any(k in t for k in keywords):
                 items.add(t)
 
         return items
 
 
 # =========================
-# HASH STABILE
+# HASH STABILE (backup debug)
 # =========================
 def make_hash(items):
     joined = "\n".join(sorted(items))
@@ -115,7 +113,6 @@ def main():
     previous = load_state()
 
     new_items = current - previous
-    removed_items = previous - current
 
     print("CURRENT:", len(current))
     print("PREVIOUS:", len(previous))
@@ -128,7 +125,7 @@ def main():
         print("BASELINE CREATED")
         return
 
-    # cambiamenti veri
+    # cambi reali
     if new_items:
         save_state(current)
 
@@ -137,7 +134,6 @@ def main():
 
         send(msg)
         print("CHANGE DETECTED")
-
     else:
         print("NO CHANGE")
 
