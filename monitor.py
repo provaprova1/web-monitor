@@ -1,5 +1,4 @@
 import os
-import hashlib
 import requests
 from playwright.sync_api import sync_playwright
 
@@ -19,36 +18,36 @@ def send(msg):
         print("Missing Telegram config")
         return
 
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            data={"chat_id": CHAT_ID, "text": msg},
-            timeout=10
-        )
-    except Exception as e:
-        print("Telegram error:", e)
+    requests.post(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+        data={"chat_id": CHAT_ID, "text": msg},
+        timeout=10
+    )
 
 
 # =========================
-# STATE
+# STATE (SET DI PROMO)
 # =========================
 def load_state():
     if not os.path.exists(STATE_FILE):
-        return None
-    return open(STATE_FILE, "r").read().strip()
+        return set()
+    return set(open(STATE_FILE, "r", encoding="utf-8").read().splitlines())
 
 
-def save_state(v):
-    with open(STATE_FILE, "w") as f:
-        f.write(v)
-
-
-def make_hash(text):
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+def save_state(items):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        f.write("\n".join(sorted(items)))
 
 
 # =========================
-# EXTRACT SOLO PROMO SPORT
+# NORMALIZZAZIONE TESTO
+# =========================
+def clean(text):
+    return " ".join(text.lower().split())
+
+
+# =========================
+# ESTRAZIONE PRO (SOLO SEZIONE GIUSTA)
 # =========================
 def extract_promos():
     with sync_playwright() as p:
@@ -56,55 +55,69 @@ def extract_promos():
         page = browser.new_page()
 
         page.goto(URL, wait_until="networkidle", timeout=60000)
-
-        # attesa JS
         page.wait_for_timeout(8000)
 
-        # scroll per trigger contenuti dinamici
+        # scroll per lazy load
         page.mouse.wheel(0, 3000)
         page.wait_for_timeout(3000)
 
-        # 🔥 CERCA SOLO SEZIONE PROMO SPORT
         section = page.query_selector("text=Promozioni Sport")
 
-        if section:
-            text = section.evaluate("""
-                el => el.parentElement ? el.parentElement.innerText : el.innerText
-            """)
+        if not section:
             browser.close()
-            return text.lower().strip()
+            return set()
 
-        # fallback se non trova la sezione
-        html = page.content()
+        container = section.evaluate("""
+            el => el.parentElement ? el.parentElement.innerText : el.innerText
+        """)
+
         browser.close()
-        return html[:2000]
+
+        lines = set()
+
+        for line in container.split("\n"):
+            t = clean(line)
+
+            if len(t) < 15:
+                continue
+
+            # filtra roba utile
+            if any(k in t for k in ["bonus", "promo", "cashback", "freebet", "rimborso"]):
+                lines.add(t)
+
+        return lines
 
 
 # =========================
-# MAIN
+# MAIN (DIFF INTELLIGENTE)
 # =========================
 def main():
     print("RUN START")
 
-    data = extract_promos()
-    new_hash = make_hash(data)
-    old_hash = load_state()
+    current = extract_promos()
+    previous = load_state()
 
-    print("OLD:", old_hash)
-    print("NEW:", new_hash)
+    new_items = current - previous
+
+    print("CURRENT:", len(current))
+    print("PREVIOUS:", len(previous))
+    print("NEW ITEMS:", len(new_items))
 
     # primo run
-    if old_hash is None:
-        save_state(new_hash)
+    if not previous:
+        save_state(current)
         send("🟢 Monitor avviato (baseline iniziale)")
         print("BASELINE CREATED")
         return
 
-    # cambiamento
-    if new_hash != old_hash:
-        save_state(new_hash)
-        send("⚠️ NUOVE PROMO RILEVATE!\n\n" + URL)
-        print("CHANGE DETECTED")
+    # cambiamenti reali
+    if new_items:
+        save_state(current)
+
+        msg = "⚠️ NUOVE PROMO RILEVATE:\n\n" + "\n".join(list(new_items)[:10])
+        send(msg)
+
+        print("NEW PROMOS DETECTED")
     else:
         print("NO CHANGE")
 
