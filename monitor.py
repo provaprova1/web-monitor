@@ -11,9 +11,6 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
 
-# =========================
-# TELEGRAM
-# =========================
 def send_telegram(msg):
     if not BOT_TOKEN or not CHAT_ID:
         print("Missing Telegram config")
@@ -26,16 +23,21 @@ def send_telegram(msg):
     )
 
 
-# =========================
-# ESTRAZIONE PROMO STABILI
-# =========================
 def extract_promos():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
         page = browser.new_page()
 
-        page.goto(URL, wait_until="networkidle", timeout=60000)
-        page.wait_for_timeout(4000)
+        page.goto(URL, wait_until="domcontentloaded", timeout=60000)
+
+        # 🔥 FIX CRUCIALE: ASPETTA CONTENUTO REALE
+        page.wait_for_timeout(8000)
+
+        page.wait_for_load_state("networkidle")
+
+        html = page.content()
+
+        print("HTML SIZE:", len(html))  # debug
 
         elements = page.query_selector_all("a, h2, h3, p")
 
@@ -49,7 +51,6 @@ def extract_promos():
                 if len(text) < 10:
                     continue
 
-                # filtro anti rumore
                 if any(k in text for k in ["bonus", "promo", "cashback", "freebet", "rimborso"]):
                     promos.append(text[:140])
 
@@ -61,21 +62,14 @@ def extract_promos():
         return sorted(set(promos))
 
 
-# =========================
-# HASH STABILE
-# =========================
 def make_hash(data):
-    return hashlib.sha256("\n".join(data).encode("utf-8")).hexdigest()
+    return hashlib.sha256("\n".join(data).encode()).hexdigest()
 
 
-# =========================
-# STATE
-# =========================
 def load_state():
     if not os.path.exists(STATE_FILE):
         return None
-    with open(STATE_FILE, "r") as f:
-        return f.read().strip()
+    return open(STATE_FILE, "r").read().strip()
 
 
 def save_state(h):
@@ -83,28 +77,27 @@ def save_state(h):
         f.write(h)
 
 
-# =========================
-# MAIN
-# =========================
 def main():
     print("RUN START")
 
     promos = extract_promos()
+
+    print("PROMOS FOUND:", len(promos))
+    for p in promos[:10]:
+        print("-", p)
+
     new_hash = make_hash(promos)
     old_hash = load_state()
 
-    print("PROMOS FOUND:", len(promos))
     print("OLD HASH:", old_hash)
     print("NEW HASH:", new_hash)
 
-    # 🟢 PRIMO RUN
     if old_hash is None:
         save_state(new_hash)
         send_telegram("🟢 Monitor avviato (baseline iniziale)")
         print("BASELINE CREATED")
         return
 
-    # ⚠️ CAMBIAMENTO
     if new_hash != old_hash:
         save_state(new_hash)
         send_telegram("⚠️ NUOVE PROMO RILEVATE!\n\n" + URL)
