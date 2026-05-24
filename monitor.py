@@ -28,30 +28,44 @@ def extract_promos():
         browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
         page = browser.new_page()
 
-        page.goto(URL, wait_until="domcontentloaded", timeout=60000)
+        page.goto(URL, wait_until="networkidle", timeout=60000)
         page.wait_for_timeout(5000)
 
-        elements = page.query_selector_all("a, h1, h2, h3, p")
+        # 🎯 STEP CRITICO: trova la sezione giusta
+        candidates = page.query_selector_all("section, div")
+
+        target = None
+
+        for c in candidates:
+            try:
+                txt = c.inner_text().lower()
+
+                # individua sezione SPORT
+                if "promozioni sport" in txt:
+                    target = c
+                    break
+            except:
+                continue
 
         promos = []
 
-        for el in elements:
-            try:
-                text = el.inner_text().lower().strip()
+        if target:
+            items = target.query_selector_all("a, h3, h2, p")
 
-                # normalizzazione forte
-                text = " ".join(text.split())
+            for i in items:
+                try:
+                    t = i.inner_text().lower().strip()
+                    t = " ".join(t.split())
 
-                # filtra solo blocchi realmente “promo-like”
-                if any(k in text for k in ["bonus", "promo", "cashback", "freebet", "rimborso"]):
+                    # filtro minimo sensato
+                    if len(t) < 10:
+                        continue
 
-                    # elimina variabili tipiche
-                    cleaned = "".join([c for c in text if not c.isdigit()])
+                    if any(k in t for k in ["bonus", "promo", "cashback", "freebet", "rimborso", "serie a", "laliga", "premier"]):
+                        promos.append(t[:120])
 
-                    promos.append(cleaned[:150])
-
-            except:
-                continue
+                except:
+                    continue
 
         browser.close()
 
@@ -76,7 +90,9 @@ def save_state(h):
 def main():
     promos = extract_promos()
 
-    print("PROMO:", len(promos))
+    print("PROMO TROVATE:", len(promos))
+    for p in promos[:10]:
+        print("-", p)
 
     new_hash = make_hash(promos)
     old_hash = load_state()
@@ -86,7 +102,7 @@ def main():
 
     if old_hash is None:
         save_state(new_hash)
-        send_telegram("🟢 Monitor avviato (baseline salvata)")
+        send_telegram("🟢 Monitor avviato (baseline SPORT section)")
         print("INIT OK")
         return
 
