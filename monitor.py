@@ -2,15 +2,13 @@ import os
 import hashlib
 import requests
 from playwright.sync_api import sync_playwright
-from PIL import Image, ImageChops
-import io
 
 URL = "https://eplay24.it/promozioni"
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
-STATE_FILE = "state.png"
+STATE_FILE = "state.txt"
 
 
 # =========================
@@ -21,46 +19,48 @@ def send_telegram(msg):
         print("Missing Telegram config")
         return
 
-    requests.post(
-        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-        data={"chat_id": CHAT_ID, "text": msg},
-        timeout=10
-    )
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            data={"chat_id": CHAT_ID, "text": msg},
+            timeout=10
+        )
+    except Exception as e:
+        print("Telegram error:", e)
 
 
 # =========================
-# SCREENSHOT SEZIONE
+# SCREENSHOT + ESTRAZIONE TESTO STABILE
 # =========================
-def take_screenshot():
+def extract_content():
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage"]
+        )
+
         page = browser.new_page()
 
-        page.goto(URL, wait_until="networkidle", timeout=60000)
-
+        page.goto(URL, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(5000)
 
-        # screenshot pagina intera
-        screenshot = page.screenshot(full_page=True)
+        # SOLO testo visibile
+        text = page.evaluate("document.body.innerText")
 
         browser.close()
 
-        return screenshot
+        # normalizzazione forte
+        text = text.lower()
+        text = " ".join(text.split())
+
+        return text
 
 
 # =========================
-# DIFF IMMAGINI
+# HASH
 # =========================
-def images_different(img1_bytes, img2_bytes):
-    img1 = Image.open(io.BytesIO(img1_bytes)).convert("RGB")
-    img2 = Image.open(io.BytesIO(img2_bytes)).convert("RGB")
-
-    diff = ImageChops.difference(img1, img2)
-
-    # misura differenza totale
-    bbox = diff.getbbox()
-
-    return bbox is not None
+def make_hash(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 # =========================
@@ -68,31 +68,41 @@ def images_different(img1_bytes, img2_bytes):
 # =========================
 def load_state():
     if os.path.exists(STATE_FILE):
-        return open(STATE_FILE, "rb").read()
+        with open(STATE_FILE, "r") as f:
+            return f.read().strip()
     return None
 
 
-def save_state(img_bytes):
-    with open(STATE_FILE, "wb") as f:
-        f.write(img_bytes)
+def save_state(h):
+    with open(STATE_FILE, "w") as f:
+        f.write(h)
 
 
 # =========================
 # MAIN
 # =========================
 def main():
-    current = take_screenshot()
+    content = extract_content()
 
-    old = load_state()
+    if not content:
+        print("EMPTY CONTENT")
+        return
 
-    if old is None:
-        save_state(current)
-        send_telegram("🟢 Monitor avviato (baseline visiva salvata)")
+    new_hash = make_hash(content)
+    old_hash = load_state()
+
+    print("HASH NUOVO:", new_hash)
+    print("HASH VECCHIO:", old_hash)
+
+    # 🔥 FIX IMPORTANTE: debug reale
+    if old_hash is None:
+        save_state(new_hash)
+        send_telegram("🟢 Monitor avviato (baseline salvata)")
         print("INIT OK")
         return
 
-    if images_different(old, current):
-        save_state(current)
+    if new_hash != old_hash:
+        save_state(new_hash)
         send_telegram("⚠️ NUOVE PROMO RILEVATE!\n\n" + URL)
         print("CAMBIAMENTO RILEVATO")
     else:
