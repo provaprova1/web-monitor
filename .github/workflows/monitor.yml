@@ -36,4 +36,5 @@ jobs:
           git config user.email github-actions@github.com
           git add state.txt || true
           git commit -m "update state" || echo "no changes"
+          git pull --rebase origin main || true
           git push || echo "nothing to push"
