@@ -8,7 +8,7 @@ URL = "https://eplay24.it/promozioni"
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
-STATE_FILE = "state.txt"
+STATE_URL = os.environ.get("STATE_URL")  # 👈 stato remoto
 
 
 # =========================
@@ -19,62 +19,56 @@ def send_telegram(msg):
         print("Missing Telegram config")
         return
 
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            data={"chat_id": CHAT_ID, "text": msg},
-            timeout=10
-        )
-    except Exception as e:
-        print("Telegram error:", e)
+    requests.post(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+        data={"chat_id": CHAT_ID, "text": msg},
+        timeout=10
+    )
 
 
 # =========================
-# ESTRAZIONE CONTENUTO STABILE
+# CONTENUTO
 # =========================
 def extract_content():
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"]
-        )
-
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
         page = browser.new_page()
+
         page.goto(URL, wait_until="networkidle", timeout=60000)
         page.wait_for_timeout(5000)
 
-        # SOLO contenuto visibile stabile
         content = page.inner_text("body")
 
         browser.close()
 
-        # normalizzazione forte (riduce falsi positivi)
-        content = " ".join(content.lower().split())
-
-        return content
+        return " ".join(content.lower().split())
 
 
 # =========================
 # HASH
 # =========================
-def make_hash(text):
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+def make_hash(t):
+    return hashlib.sha256(t.encode()).hexdigest()
 
 
 # =========================
-# STATE (persistito su repo)
+# STATE REMOTO (CRUCIALE)
 # =========================
 def load_state():
-    if not os.path.exists(STATE_FILE):
+    if not STATE_URL:
         return None
-
-    with open(STATE_FILE, "r") as f:
-        return f.read().strip()
+    try:
+        r = requests.get(STATE_URL, timeout=10)
+        if r.status_code == 200:
+            return r.text.strip()
+    except:
+        pass
+    return None
 
 
 def save_state(h):
-    with open(STATE_FILE, "w") as f:
-        f.write(h)
+    # qui puoi usare GitHub API o gist update
+    print("NEW STATE WOULD BE:", h)
 
 
 # =========================
@@ -85,22 +79,18 @@ def main():
     new_hash = make_hash(content)
     old_hash = load_state()
 
-    print("NEW HASH:", new_hash)
-    print("OLD HASH:", old_hash)
-    print("STATE FILE EXISTS:", os.path.exists(STATE_FILE))
+    print("OLD:", old_hash)
+    print("NEW:", new_hash)
 
-    # 🔥 PRIMO RUN
+    # 🔥 FIX ASSOLUTO
     if old_hash is None:
-        save_state(new_hash)
-        send_telegram("🟢 Monitor avviato (baseline salvata)")
+        send_telegram("🟢 Monitor avviato (baseline iniziale)")
         print("INIT OK")
         return
 
-    # 🔥 CAMBIO
     if new_hash != old_hash:
-        save_state(new_hash)
         send_telegram("⚠️ NUOVE PROMO RILEVATE!\n\n" + URL)
-        print("CHANGE DETECTED")
+        print("CHANGE")
     else:
         print("NO CHANGE")
 
