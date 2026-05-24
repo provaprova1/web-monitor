@@ -27,52 +27,63 @@ def send_telegram(msg):
 
 
 # =========================
-# ESTRAZIONE CARD PROMO REALI
+# ESTRAI SOLO SEZIONE TARGET
 # =========================
-def extract_promos():
+def extract_section():
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
-        page = browser.new_page()
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox"]
+        )
 
+        page = browser.new_page()
         page.goto(URL, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(5000)
 
-        # 🔥 prende TUTTI i link (spesso ogni promo è un link)
-        elements = page.query_selector_all("a")
+        # 🔥 CERCA BLOCCO PROMO SPORT
+        sections = page.query_selector_all("section, main, div")
 
-        promos = []
+        target_text = ""
 
-        for el in elements:
+        for sec in sections:
             try:
-                href = el.get_attribute("href")
-                text = el.inner_text().strip()
+                txt = sec.inner_text().lower()
 
-                if not href:
-                    continue
-
-                # normalizza URL
-                if href.startswith("/"):
-                    href = "https://eplay24.it" + href
-
-                # filtra solo link promozioni
-                if "promo" in href or "promoz" in href:
-                    key = href  # 🔥 IDENTITÀ UNIVOCA
-
-                    promos.append(key)
-
+                # filtro: deve contenere segnali promo sport
+                if (
+                    "promozioni sport" in txt
+                    or "serie a" in txt
+                    or "premier league" in txt
+                    or "laliga" in txt
+                ):
+                    target_text = txt
+                    break
             except:
                 continue
 
         browser.close()
 
-        return sorted(set(promos))
+        return target_text
+
+
+# =========================
+# NORMALIZZAZIONE STABILE
+# =========================
+def normalize(text):
+    import re
+
+    text = text.lower()
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"\d+", "<num>", text)
+
+    return text.strip()
 
 
 # =========================
 # HASH
 # =========================
-def make_hash(data):
-    return hashlib.sha256("\n".join(data).encode()).hexdigest()
+def make_hash(text):
+    return hashlib.sha256(text.encode()).hexdigest()
 
 
 # =========================
@@ -93,21 +104,21 @@ def save_state(h):
 # MAIN
 # =========================
 def main():
-    promos = extract_promos()
+    raw = extract_section()
+    content = normalize(raw)
 
-    print("PROMO IDENTIFICATE:")
-    for p in promos[:20]:
-        print("-", p)
+    print("CONTENT SAMPLE:")
+    print(content[:500])
 
-    new_hash = make_hash(promos)
+    new_hash = make_hash(content)
     old_hash = load_state()
 
     print("HASH NUOVO:", new_hash)
     print("HASH VECCHIO:", old_hash)
 
-    if old_hash is None:
+    if not old_hash:
         save_state(new_hash)
-        send_telegram("🟢 Monitor avviato (baseline promo salvata)")
+        send_telegram("🟢 Monitor avviato (baseline Visual-style)")
         print("INIT OK")
         return
 
