@@ -31,48 +31,7 @@ def send_telegram(msg):
 
 
 # =========================
-# FILTRO PROMO REALI
-# =========================
-def extract_promos(text):
-    lines = text.splitlines()
-
-    promos = []
-
-    keywords = [
-        "bonus",
-        "promo",
-        "freebet",
-        "rimborso",
-        "%",
-        "€",
-        "scomm",
-        "cashback",
-        "quote"
-    ]
-
-    for line in lines:
-        line = line.strip().lower()
-
-        if len(line) < 15:
-            continue
-
-        # ignora righe troppo lunghe (menu/footer)
-        if len(line) > 200:
-            continue
-
-        if any(k in line for k in keywords):
-            # normalizzazione forte
-            line = re.sub(r"\s+", " ", line)
-            promos.append(line)
-
-    # rimuove duplicati
-    promos = sorted(set(promos))
-
-    return promos
-
-
-# =========================
-# ESTRAZIONE CONTENUTO
+# ESTRAZIONE PAGINA
 # =========================
 def get_page_text():
     with sync_playwright() as p:
@@ -85,7 +44,6 @@ def get_page_text():
 
         try:
             page.goto(URL, wait_until="domcontentloaded", timeout=60000)
-
             page.wait_for_timeout(5000)
 
             text = page.evaluate("document.body.innerText")
@@ -101,11 +59,45 @@ def get_page_text():
 
 
 # =========================
-# HASH
+# ESTRAZIONE PROMO STABILI
+# =========================
+def extract_promos(text):
+    lines = text.splitlines()
+    promos = []
+
+    keywords = [
+        "bonus", "promo", "freebet",
+        "cashback", "rimborso",
+        "scomm", "quote", "€", "%"
+    ]
+
+    for line in lines:
+        line = line.lower().strip()
+
+        # pulizia base
+        line = re.sub(r"\s+", " ", line)
+        line = re.sub(r"\d+", "<num>", line)
+
+        if len(line) < 20:
+            continue
+
+        if len(line) > 180:
+            continue
+
+        if any(k in line for k in keywords):
+            promos.append(line)
+
+    # stabilizzazione totale
+    promos = sorted(set(promos))
+
+    return promos
+
+
+# =========================
+# HASH STABILE
 # =========================
 def make_hash(promos):
-    joined = "\n".join(promos)
-    return hashlib.sha256(joined.encode()).hexdigest()
+    return hashlib.sha256("\n".join(promos).encode("utf-8")).hexdigest()
 
 
 # =========================
@@ -129,37 +121,34 @@ def save_state(h):
 def main():
     text = get_page_text()
 
+    if not text:
+        print("EMPTY PAGE")
+        return
+
     promos = extract_promos(text)
 
-    print("PROMO TROVATE:")
+    print("\nPROMO RILEVATE:")
     for p in promos[:20]:
         print("-", p)
 
     new_hash = make_hash(promos)
     old_hash = load_state()
 
-    print("HASH NUOVO:", new_hash)
+    print("\nHASH NUOVO:", new_hash)
     print("HASH VECCHIO:", old_hash)
 
+    # PRIMO RUN
     if old_hash is None:
         save_state(new_hash)
-
-        send_telegram(
-            "🟢 Monitor avviato (baseline promo salvata)"
-        )
-
+        send_telegram("🟢 Monitor avviato (baseline salvata)")
         print("INIT OK")
         return
 
+    # CAMBIAMENTO
     if new_hash != old_hash:
         save_state(new_hash)
-
-        send_telegram(
-            "⚠️ NUOVE PROMO RILEVATE!\n\n" + URL
-        )
-
+        send_telegram("⚠️ NUOVE PROMO RILEVATE!\n\n" + URL)
         print("CAMBIAMENTO RILEVATO")
-
     else:
         print("NESSUNA VARIAZIONE")
 
