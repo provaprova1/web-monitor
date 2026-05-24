@@ -19,20 +19,17 @@ def send_telegram(msg):
         print("Missing Telegram config")
         return
 
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            data={"chat_id": CHAT_ID, "text": msg},
-            timeout=10
-        )
-    except Exception as e:
-        print("Telegram error:", e)
+    requests.post(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+        data={"chat_id": CHAT_ID, "text": msg},
+        timeout=10
+    )
 
 
 # =========================
-# SCREENSHOT + ESTRAZIONE TESTO STABILE
+# ESTRAZIONE PROMO REALI (CARD-BASED)
 # =========================
-def extract_content():
+def extract_promos():
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
@@ -40,27 +37,40 @@ def extract_content():
         )
 
         page = browser.new_page()
-
         page.goto(URL, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(5000)
 
-        # SOLO testo visibile
-        text = page.evaluate("document.body.innerText")
+        cards = page.query_selector_all("a, div")
+
+        promos = []
+
+        for c in cards:
+            try:
+                text = c.inner_text().strip().lower()
+                href = c.get_attribute("href")
+
+                if not text:
+                    continue
+
+                # filtro minimo “promo-like”
+                if any(k in text for k in ["bonus", "promo", "cashback", "freebet", "rimborso", "€", "%"]):
+
+                    key = (text[:120] + "|" + (href or "")).strip()
+                    promos.append(key)
+
+            except:
+                continue
 
         browser.close()
 
-        # normalizzazione forte
-        text = text.lower()
-        text = " ".join(text.split())
-
-        return text
+        return sorted(set(promos))
 
 
 # =========================
 # HASH
 # =========================
-def make_hash(text):
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+def make_hash(data):
+    return hashlib.sha256("\n".join(data).encode()).hexdigest()
 
 
 # =========================
@@ -68,8 +78,7 @@ def make_hash(text):
 # =========================
 def load_state():
     if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r") as f:
-            return f.read().strip()
+        return open(STATE_FILE).read().strip()
     return None
 
 
@@ -82,22 +91,19 @@ def save_state(h):
 # MAIN
 # =========================
 def main():
-    content = extract_content()
+    promos = extract_promos()
 
-    if not content:
-        print("EMPTY CONTENT")
-        return
+    print("PROMO TROVATE:", len(promos))
 
-    new_hash = make_hash(content)
+    new_hash = make_hash(promos)
     old_hash = load_state()
 
     print("HASH NUOVO:", new_hash)
     print("HASH VECCHIO:", old_hash)
 
-    # 🔥 FIX IMPORTANTE: debug reale
     if old_hash is None:
         save_state(new_hash)
-        send_telegram("🟢 Monitor avviato (baseline salvata)")
+        send_telegram("🟢 Monitor avviato (baseline promo salvata)")
         print("INIT OK")
         return
 
