@@ -1,5 +1,4 @@
 import os
-import re
 import hashlib
 import requests
 from playwright.sync_api import sync_playwright
@@ -17,87 +16,63 @@ STATE_FILE = "state.txt"
 # =========================
 def send_telegram(msg):
     if not BOT_TOKEN or not CHAT_ID:
-        print("Missing BOT_TOKEN or CHAT_ID")
+        print("Missing Telegram config")
         return
 
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            data={"chat_id": CHAT_ID, "text": msg},
-            timeout=10
-        )
-    except Exception as e:
-        print("Telegram error:", e)
+    requests.post(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+        data={"chat_id": CHAT_ID, "text": msg},
+        timeout=10
+    )
 
 
 # =========================
-# ESTRAZIONE PAGINA
+# ESTRAZIONE CARD PROMO REALI
 # =========================
-def get_page_text():
+def extract_promos():
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"]
-        )
-
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
         page = browser.new_page()
 
-        try:
-            page.goto(URL, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(5000)
+        page.goto(URL, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(5000)
 
-            text = page.evaluate("document.body.innerText")
+        # 🔥 prende TUTTI i link (spesso ogni promo è un link)
+        elements = page.query_selector_all("a")
 
-        except Exception as e:
-            print("Page error:", e)
-            text = ""
+        promos = []
 
-        finally:
-            browser.close()
+        for el in elements:
+            try:
+                href = el.get_attribute("href")
+                text = el.inner_text().strip()
 
-        return text
+                if not href:
+                    continue
 
+                # normalizza URL
+                if href.startswith("/"):
+                    href = "https://eplay24.it" + href
 
-# =========================
-# ESTRAZIONE PROMO STABILI
-# =========================
-def extract_promos(text):
-    lines = text.splitlines()
-    promos = []
+                # filtra solo link promozioni
+                if "promo" in href or "promoz" in href:
+                    key = href  # 🔥 IDENTITÀ UNIVOCA
 
-    keywords = [
-        "bonus", "promo", "freebet",
-        "cashback", "rimborso",
-        "scomm", "quote", "€", "%"
-    ]
+                    promos.append(key)
 
-    for line in lines:
-        line = line.lower().strip()
+            except:
+                continue
 
-        # pulizia base
-        line = re.sub(r"\s+", " ", line)
-        line = re.sub(r"\d+", "<num>", line)
+        browser.close()
 
-        if len(line) < 20:
-            continue
-
-        if len(line) > 180:
-            continue
-
-        if any(k in line for k in keywords):
-            promos.append(line)
-
-    # stabilizzazione totale
-    promos = sorted(set(promos))
-
-    return promos
+        return sorted(set(promos))
 
 
 # =========================
-# HASH STABILE
+# HASH
 # =========================
-def make_hash(promos):
-    return hashlib.sha256("\n".join(promos).encode("utf-8")).hexdigest()
+def make_hash(data):
+    return hashlib.sha256("\n".join(data).encode()).hexdigest()
 
 
 # =========================
@@ -105,8 +80,7 @@ def make_hash(promos):
 # =========================
 def load_state():
     if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r") as f:
-            return f.read().strip()
+        return open(STATE_FILE).read().strip()
     return None
 
 
@@ -119,32 +93,24 @@ def save_state(h):
 # MAIN
 # =========================
 def main():
-    text = get_page_text()
+    promos = extract_promos()
 
-    if not text:
-        print("EMPTY PAGE")
-        return
-
-    promos = extract_promos(text)
-
-    print("\nPROMO RILEVATE:")
+    print("PROMO IDENTIFICATE:")
     for p in promos[:20]:
         print("-", p)
 
     new_hash = make_hash(promos)
     old_hash = load_state()
 
-    print("\nHASH NUOVO:", new_hash)
+    print("HASH NUOVO:", new_hash)
     print("HASH VECCHIO:", old_hash)
 
-    # PRIMO RUN
     if old_hash is None:
         save_state(new_hash)
-        send_telegram("🟢 Monitor avviato (baseline salvata)")
+        send_telegram("🟢 Monitor avviato (baseline promo salvata)")
         print("INIT OK")
         return
 
-    # CAMBIAMENTO
     if new_hash != old_hash:
         save_state(new_hash)
         send_telegram("⚠️ NUOVE PROMO RILEVATE!\n\n" + URL)
