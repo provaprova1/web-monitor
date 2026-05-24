@@ -1,16 +1,15 @@
 import os
 import hashlib
 import requests
-from datetime import datetime
 from playwright.sync_api import sync_playwright
 
 URL = "https://eplay24.it/promozioni"
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-CHAT_ID = os.environ.get("CHAT_ID")
-
 STATE_FILE = "state.txt"
 STATE_SHA_FILE = "state_sha.txt"
+
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+CHAT_ID = os.environ.get("CHAT_ID")
 
 
 # =========================
@@ -21,18 +20,15 @@ def send_telegram(msg):
         print("Missing Telegram config")
         return
 
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            data={"chat_id": CHAT_ID, "text": msg},
-            timeout=10
-        )
-    except Exception as e:
-        print("Telegram error:", e)
+    requests.post(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+        data={"chat_id": CHAT_ID, "text": msg},
+        timeout=10
+    )
 
 
 # =========================
-# ESTRAZIONE PROMO STABILI
+# SCRAPING STABILE
 # =========================
 def extract_promos():
     with sync_playwright() as p:
@@ -68,7 +64,7 @@ def extract_promos():
 # =========================
 # HASH
 # =========================
-def make_hash(data):
+def hash_data(data):
     return hashlib.sha256("\n".join(data).encode()).hexdigest()
 
 
@@ -104,12 +100,9 @@ def save_sha(sha):
 # MAIN
 # =========================
 def main():
-    print("📁 RUN STARTED")
-    print("TIME:", datetime.utcnow().isoformat())
+    print("RUN START")
 
-    # 🔥 commit SHA corrente (GitHub Actions)
     current_sha = os.environ.get("GITHUB_SHA", "local")
-
     last_sha = load_sha()
 
     print("CURRENT SHA:", current_sha)
@@ -119,25 +112,27 @@ def main():
     # RESET SU NUOVO DEPLOY
     # =========================
     if last_sha != current_sha:
-        print("🟡 NEW DEPLOY DETECTED → RESET STATE")
+        print("NEW DEPLOY → RESET BASELINE")
 
-        save_sha(current_sha)
         promos = extract_promos()
-        save_state(make_hash(promos))
+        h = hash_data(promos)
+
+        save_state(h)
+        save_sha(current_sha)
 
         send_telegram("🟢 Nuova baseline creata (nuovo deploy)")
-        print("BASELINE RESET COMPLETED")
+        print("BASELINE CREATED")
         return
 
     # =========================
-    # NORMAL FLOW
+    # CHECK NORMALE
     # =========================
     promos = extract_promos()
-    new_hash = make_hash(promos)
+    new_hash = hash_data(promos)
     old_hash = load_state()
 
-    print("OLD HASH:", old_hash)
-    print("NEW HASH:", new_hash)
+    print("OLD:", old_hash)
+    print("NEW:", new_hash)
 
     if old_hash is None:
         save_state(new_hash)
