@@ -57,7 +57,7 @@ def save_state(h):
 
 
 # =========================
-# SCREENSHOT SEZIONE PROMO
+# SCREENSHOT SOLO PROMO SPORT
 # =========================
 def capture_section():
     with sync_playwright() as p:
@@ -72,18 +72,30 @@ def capture_section():
 
         page.goto(URL, wait_until="networkidle", timeout=60000)
 
-        # attesa JS
+        # attesa caricamento JS
         page.wait_for_timeout(10000)
 
         # scroll per lazy loading
         page.mouse.wheel(0, 4000)
         page.wait_for_timeout(3000)
 
-        # screenshot completo
-        page.screenshot(
-            path=SCREENSHOT_FILE,
-            full_page=True
-        )
+        # 🔥 cerca il testo "Promozioni Sport"
+        locator = page.locator("text=Promozioni Sport").first
+
+        # se non esiste → fallback full page
+        if locator.count() == 0:
+            print("PROMO SECTION NOT FOUND -> FULL PAGE")
+
+            page.screenshot(
+                path=SCREENSHOT_FILE,
+                full_page=True
+            )
+
+        else:
+            print("PROMO SECTION FOUND")
+
+            # screenshot SOLO area promo
+            locator.screenshot(path=SCREENSHOT_FILE)
 
         browser.close()
 
@@ -106,17 +118,17 @@ def main():
     if old_hash is None:
         save_state(new_hash)
 
-        send("🟢 Monitor visuale avviato (baseline iniziale)")
+        send("🟢 Monitor promo sportive avviato (baseline iniziale)")
 
         print("BASELINE CREATED")
         return
 
-    # cambiamento visivo
+    # cambiamento
     if new_hash != old_hash:
         save_state(new_hash)
 
         send(
-            "⚠️ CAMBIAMENTO VISIVO RILEVATO NELLE PROMO!\n\n"
+            "⚠️ CAMBIAMENTO VISIVO RILEVATO NELLE PROMO SPORT!\n\n"
             + URL
         )
 
