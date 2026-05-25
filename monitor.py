@@ -57,7 +57,7 @@ def save_state(h):
 
 
 # =========================
-# SCREENSHOT SOLO PROMO SPORT
+# SCREENSHOT AREA STABILE
 # =========================
 def capture_section():
     with sync_playwright() as p:
@@ -73,29 +73,22 @@ def capture_section():
         page.goto(URL, wait_until="networkidle", timeout=60000)
 
         # attesa caricamento JS
-        page.wait_for_timeout(10000)
+        page.wait_for_timeout(12000)
 
-        # scroll per lazy loading
-        page.mouse.wheel(0, 4000)
+        # scroll
+        page.mouse.wheel(0, 2500)
         page.wait_for_timeout(3000)
 
-        # 🔥 cerca il testo "Promozioni Sport"
-        locator = page.locator("text=Promozioni Sport").first
-
-        # se non esiste → fallback full page
-        if locator.count() == 0:
-            print("PROMO SECTION NOT FOUND -> FULL PAGE")
-
-            page.screenshot(
-                path=SCREENSHOT_FILE,
-                full_page=True
-            )
-
-        else:
-            print("PROMO SECTION FOUND")
-
-            # screenshot SOLO area promo
-            locator.screenshot(path=SCREENSHOT_FILE)
+        # screenshot area fissa stabile
+        page.screenshot(
+            path=SCREENSHOT_FILE,
+            clip={
+                "x": 0,
+                "y": 500,
+                "width": 1400,
+                "height": 900
+            }
+        )
 
         browser.close()
 
@@ -123,7 +116,7 @@ def main():
         print("BASELINE CREATED")
         return
 
-    # cambiamento
+    # cambiamento reale
     if new_hash != old_hash:
         save_state(new_hash)
 
