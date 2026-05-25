@@ -1,12 +1,12 @@
 import os
-import hashlib
 import requests
 from playwright.sync_api import sync_playwright
+from PIL import Image, ImageChops
 
 URL = "https://eplay24.it/promozioni"
 
-STATE_FILE = "state.txt"
-SCREENSHOT_FILE = "promo_section.png"
+BASELINE = "baseline.png"
+CURRENT = "current.png"
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
@@ -17,118 +17,90 @@ CHAT_ID = os.environ.get("CHAT_ID")
 # =========================
 def send(msg):
     if not BOT_TOKEN or not CHAT_ID:
-        print("Missing Telegram config")
+        print("Telegram config missing")
         return
 
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            data={
-                "chat_id": CHAT_ID,
-                "text": msg
-            },
-            timeout=10
-        )
-    except Exception as e:
-        print("Telegram error:", e)
+    requests.post(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+        data={"chat_id": CHAT_ID, "text": msg},
+        timeout=10
+    )
 
 
 # =========================
-# HASH FILE
+# SCREENSHOT
 # =========================
-def file_hash(path):
-    with open(path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
-
-
-# =========================
-# STATE
-# =========================
-def load_state():
-    if not os.path.exists(STATE_FILE):
-        return None
-
-    return open(STATE_FILE, "r").read().strip()
-
-
-def save_state(h):
-    with open(STATE_FILE, "w") as f:
-        f.write(h)
-
-
-# =========================
-# SCREENSHOT AREA STABILE
-# =========================
-def capture_section():
+def capture(path):
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox"]
-        )
-
-        page = browser.new_page(
-            viewport={"width": 1400, "height": 3000}
-        )
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
+        page = browser.new_page(viewport={"width": 1400, "height": 2500})
 
         page.goto(URL, wait_until="networkidle", timeout=60000)
-
-        # attesa caricamento JS
         page.wait_for_timeout(12000)
 
-        # scroll
         page.mouse.wheel(0, 2500)
         page.wait_for_timeout(3000)
 
-        # screenshot area fissa stabile
         page.screenshot(
-            path=SCREENSHOT_FILE,
-            clip={
-                "x": 0,
-                "y": 500,
-                "width": 1400,
-                "height": 900
-            }
+            path=path,
+            clip={"x": 0, "y": 500, "width": 1400, "height": 900}
         )
 
         browser.close()
 
 
 # =========================
-# MAIN
+# DIFF
+# =========================
+def diff(img1, img2):
+    im1 = Image.open(img1)
+    im2 = Image.open(img2)
+
+    d = ImageChops.difference(im1, im2)
+    return sum(d.histogram())
+
+
+# =========================
+# MAIN LOGIC CORRETTA
 # =========================
 def main():
     print("RUN START")
 
-    capture_section()
+    # =========================
+    # 🟢 FIRST RUN (BASELINE ONLY)
+    # =========================
+    if not os.path.exists(BASELINE):
+        print("NO BASELINE FOUND → CREATING IT")
 
-    new_hash = file_hash(SCREENSHOT_FILE)
-    old_hash = load_state()
+        capture(BASELINE)
 
-    print("OLD:", old_hash)
-    print("NEW:", new_hash)
+        send("🟢 Baseline creata (primo run)")
 
-    # primo run
-    if old_hash is None:
-        save_state(new_hash)
+        print("BASELINE CREATED - EXIT")
+        return  # 🔥 STOP QUI (FONDAMENTALE)
 
-        send("🟢 Monitor promo sportive avviato (baseline iniziale)")
+    # =========================
+    # 🟡 NORMAL RUN
+    # =========================
+    capture(CURRENT)
 
-        print("BASELINE CREATED")
-        return
+    score = diff(BASELINE, CURRENT)
 
-    # cambiamento reale
-    if new_hash != old_hash:
-        save_state(new_hash)
+    print("DIFF SCORE:", score)
 
-        send(
-            "⚠️ CAMBIAMENTO VISIVO RILEVATO NELLE PROMO SPORT!\n\n"
-            + URL
-        )
+    THRESHOLD = 50000  # soglia anti-falsi positivi
 
+    if score > THRESHOLD:
         print("CHANGE DETECTED")
+
+        # aggiorna baseline SOLO se cambia davvero
+        os.replace(CURRENT, BASELINE)
+
+        send("⚠️ CAMBIAMENTO VISIVO RILEVATO NELLE PROMO SPORT!")
 
     else:
         print("NO CHANGE")
+        os.remove(CURRENT)
 
 
 if __name__ == "__main__":
